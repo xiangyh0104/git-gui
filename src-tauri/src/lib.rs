@@ -5,7 +5,7 @@ use config::{add_project, get_config, remove_project, save_config};
 use git::{
     git_abort_merge, git_commit, git_commit_and_push, git_fetch_all, git_force_pull,
     git_get_current_branch, git_list_remote_branches, git_log, git_merge_branch, git_push,
-    git_reset_hard, git_switch_branch, git_sync_before_merge,
+    git_repair, git_reset_hard, git_switch_branch, git_sync_before_merge,
 };
 use tauri::Manager;
 
@@ -38,6 +38,7 @@ pub fn run() {
             git_abort_merge,
             git_reset_hard,
             git_force_pull,
+            git_repair,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

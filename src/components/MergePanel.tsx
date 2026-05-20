@@ -85,6 +85,9 @@ export default function MergePanel({
       } else if (result.hasConflicts) {
         onLog("warning", `合并存在冲突: ${result.conflictFiles.length} 个文件`);
         setConflictFiles(result.conflictFiles);
+        const conflictSection = "\n\n# Conflicts:\n" +
+          result.conflictFiles.map((f) => `#\t${f}`).join("\n");
+        setCommitMessage(msg + conflictSection);
         setPhase("conflict");
       } else {
         onLog("error", result.output || "合并失败");

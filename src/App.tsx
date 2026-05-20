@@ -8,6 +8,7 @@ import {
   gitPush,
   gitResetHard,
   gitForcePull,
+  gitRepair,
 } from "./lib/commands";
 import ProjectSelector from "./components/ProjectSelector";
 import ActionButtons from "./components/ActionButtons";
@@ -27,6 +28,7 @@ const ACTION_LABELS: Record<string, string> = {
   reset: "重置分支",
   "force-pull": "更新分支",
   log: "查看日志",
+  repair: "修复仓库",
 };
 
 let logIdCounter = 0;
@@ -179,6 +181,16 @@ function App() {
           addLog("success", result || "重置完成");
           await refreshBranch(projectPath);
           await notify("Git 助手", "分支已重置");
+          succeeded = true;
+          break;
+        }
+        case "repair": {
+          const confirmed = window.confirm("确定修复仓库? 将执行 fsck + repack，耗时较长");
+          if (!confirmed) break;
+          addLog("command", "> git fsck && git repack -a -d -f");
+          const repairResult = await gitRepair(projectPath);
+          addLog("info", repairResult);
+          await notify("Git 助手", "仓库修复完成");
           succeeded = true;
           break;
         }

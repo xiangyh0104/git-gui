@@ -68,3 +68,7 @@ export async function gitResetHard(projectPath: string): Promise<string> {
 export async function gitForcePull(projectPath: string, autoRemove: boolean): Promise<GitOutput> {
   return invoke<GitOutput>('git_force_pull', { projectPath, autoRemove });
 }
+
+export async function gitRepair(projectPath: string): Promise<string> {
+  return invoke<string>('git_repair', { projectPath });
+}

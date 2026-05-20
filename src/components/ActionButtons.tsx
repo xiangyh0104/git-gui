@@ -20,6 +20,7 @@ const actions: ActionDef[] = [
   { id: "reset", label: "重置分支", icon: "↺", danger: true },
   { id: "force-pull", label: "更新分支", icon: "⟳" },
   { id: "log", label: "显示日志", icon: "☰" },
+  { id: "repair", label: "修复仓库", icon: "🔧", danger: true },
 ];
 
 export default function ActionButtons({ onAction, disabled, loadingAction }: Props) {
