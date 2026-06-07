@@ -13,15 +13,15 @@ interface ActionDef {
 }
 
 const actions: ActionDef[] = [
-  { id: "fetch", label: "拉取远端", icon: "↓" },
+  { id: "fetch", label: "Fetch All", icon: "↓" },
   { id: "fetch-rebase", label: "Fetch & Rebase", icon: "⇣" },
-  { id: "switch", label: "切换分支", icon: "⑂" },
-  { id: "merge", label: "合并", icon: "⤞" },
-  { id: "push", label: "推送", icon: "↑" },
-  { id: "reset", label: "重置分支", icon: "↺", danger: true },
-  { id: "force-pull", label: "更新分支", icon: "⟳" },
-  { id: "log", label: "显示日志", icon: "☰" },
-  { id: "repair", label: "修复仓库", icon: "🔧", danger: true },
+  { id: "switch", label: "Switch Branch", icon: "⑂" },
+  { id: "merge", label: "Merge Branch", icon: "⤞" },
+  { id: "push", label: "Push", icon: "↑" },
+  { id: "reset", label: "Reset Branch", icon: "↺", danger: true },
+  { id: "force-pull", label: "Force Pull", icon: "⟳" },
+  { id: "log", label: "Show Log", icon: "☰" },
+  { id: "repair", label: "Repair Repository", icon: "🔧", danger: true },
 ];
 
 export default function ActionButtons({ onAction, disabled, loadingAction }: Props) {
