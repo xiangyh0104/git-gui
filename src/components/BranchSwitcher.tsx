@@ -28,18 +28,31 @@ export default function BranchSwitcher({
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        onLog("command", "> git fetch --all");
-        await gitFetchAll(projectPath);
         const list = await gitListRemoteBranches(projectPath, false);
-        setBranches(list);
+        if (!cancelled) {
+          setBranches(list);
+          setLoading(false);
+        }
       } catch (e) {
-        onLog("error", `获取分支列表失败: ${e}`);
-      } finally {
-        setLoading(false);
+        if (!cancelled) {
+          onLog("error", `获取分支列表失败: ${e}`);
+          setLoading(false);
+        }
+      }
+      try {
+        await gitFetchAll(projectPath);
+        if (!cancelled) {
+          const freshList = await gitListRemoteBranches(projectPath, false);
+          if (!cancelled) setBranches(freshList);
+        }
+      } catch {
+        // fetch failure is non-critical since we already have local data
       }
     })();
+    return () => { cancelled = true; };
   }, [projectPath, onLog]);
 
   const handleShowAll = useCallback(async () => {
