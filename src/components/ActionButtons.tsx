@@ -14,6 +14,7 @@ interface ActionDef {
 
 const actions: ActionDef[] = [
   { id: "fetch", label: "拉取远端", icon: "↓" },
+  { id: "fetch-rebase", label: "Fetch & Rebase", icon: "⇣" },
   { id: "switch", label: "切换分支", icon: "⑂" },
   { id: "merge", label: "合并", icon: "⤞" },
   { id: "push", label: "推送", icon: "↑" },

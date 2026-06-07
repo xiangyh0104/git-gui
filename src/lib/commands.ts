@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Config, BranchInfo, GitOutput, MergeResult, CommitEntry } from '../types';
+import type { Config, BranchInfo, GitOutput, MergeResult, CommitEntry, RebaseResult } from '../types';
 
 export async function getConfig(): Promise<Config> {
   return invoke<Config>('get_config');
@@ -71,4 +71,8 @@ export async function gitForcePull(projectPath: string, autoRemove: boolean): Pr
 
 export async function gitRepair(projectPath: string): Promise<string> {
   return invoke<string>('git_repair', { projectPath });
+}
+
+export async function gitFetchRebase(projectPath: string): Promise<RebaseResult> {
+  return invoke<RebaseResult>('git_fetch_rebase', { projectPath });
 }

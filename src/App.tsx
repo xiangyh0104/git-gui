@@ -4,6 +4,7 @@ import type { Config, LogEntry, GitOutput } from "./types";
 import {
   getConfig,
   gitFetchAll,
+  gitFetchRebase,
   gitGetCurrentBranch,
   gitPush,
   gitResetHard,
@@ -22,6 +23,7 @@ import StatusAnimation from "./components/StatusAnimation";
 
 const ACTION_LABELS: Record<string, string> = {
   fetch: "拉取远端",
+  "fetch-rebase": "Fetch & Rebase",
   switch: "切换分支",
   merge: "合并分支",
   push: "推送",
@@ -163,6 +165,26 @@ function App() {
           await refreshBranch(projectPath);
           await notify("Git 助手", "远端拉取完成");
           succeeded = true;
+          break;
+        }
+        case "fetch-rebase": {
+          addLog("command", "> git fetch && git rebase origin/<branch>");
+          const rebaseResult = await gitFetchRebase(projectPath);
+          if (rebaseResult.hasConflicts) {
+            addLog("warning", "Rebase 遇到冲突，请手动解决以下文件:");
+            for (const file of rebaseResult.conflictFiles) {
+              addLog("error", `  冲突: ${file}`);
+            }
+            addLog("info", "解决冲突后再次点击 Fetch & Rebase 按钮继续");
+            await notify("Git 助手", "Rebase 冲突，请手动解决");
+          } else if (rebaseResult.success) {
+            addLog("success", rebaseResult.output || "Fetch & Rebase 完成");
+            await refreshBranch(projectPath);
+            await notify("Git 助手", "Fetch & Rebase 完成");
+            succeeded = true;
+          } else {
+            addLog("error", rebaseResult.output || "Fetch & Rebase 失败");
+          }
           break;
         }
         case "push": {

@@ -44,6 +44,14 @@ export interface GitOutput {
   needsUntrackedRemoval: boolean;
 }
 
+export interface RebaseResult {
+  success: boolean;
+  hasConflicts: boolean;
+  conflictFiles: string[];
+  output: string;
+  rebaseInProgress: boolean;
+}
+
 export interface LogEntry {
   id: number;
   timestamp: string;
