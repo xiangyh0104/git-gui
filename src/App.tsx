@@ -3,6 +3,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import type { Config, LogEntry, GitOutput } from "./types";
 import {
   getConfig,
+  saveConfig,
   gitFetchAll,
   gitFetchRebase,
   gitGetCurrentBranch,
@@ -12,7 +13,7 @@ import {
   gitRepair,
 } from "./lib/commands";
 import ProjectSelector from "./components/ProjectSelector";
-import ActionButtons from "./components/ActionButtons";
+import ActionButtons, { DEFAULT_ACTION_ORDER } from "./components/ActionButtons";
 import LogViewer from "./components/LogViewer";
 import BranchSwitcher from "./components/BranchSwitcher";
 import MergePanel from "./components/MergePanel";
@@ -262,6 +263,17 @@ function App() {
     }
   }, [config, loadingAction, addLog, refreshBranch, notify, handleUntrackedFiles]);
 
+  const handleOrderChange = useCallback(async (newOrder: string[]) => {
+    if (!config) return;
+    const newConfig = { ...config, buttonOrder: newOrder };
+    setConfig(newConfig);
+    try {
+      await saveConfig(newConfig);
+    } catch {
+      // non-critical
+    }
+  }, [config]);
+
   return (
     <div className="app">
       <header className="header">
@@ -284,11 +296,21 @@ function App() {
         </button>
       </header>
 
-      <ActionButtons onAction={handleAction} disabled={!config?.currentProject} loading={loading} loadingAction={loadingAction} />
+      <div className="app-body">
+        <ActionButtons
+          onAction={handleAction}
+          disabled={!config?.currentProject}
+          loading={loading}
+          loadingAction={loadingAction}
+          order={config?.buttonOrder?.length ? config.buttonOrder : DEFAULT_ACTION_ORDER}
+          onOrderChange={handleOrderChange}
+        />
 
-      <StatusAnimation loadingAction={loadingAction} lastResult={lastResult} />
-
-      <LogViewer logs={logs} onClear={clearLogs} />
+        <div className="main-content">
+          <StatusAnimation loadingAction={loadingAction} lastResult={lastResult} />
+          <LogViewer logs={logs} onClear={clearLogs} />
+        </div>
+      </div>
 
       {activeDialog === "branch" && config?.currentProject && (
         <BranchSwitcher

@@ -24,6 +24,8 @@ pub struct Config {
     #[serde(default = "default_log_count")]
     pub log_count: u32,
     pub merge_templates: Vec<MergeTemplate>,
+    #[serde(default)]
+    pub button_order: Vec<String>,
 }
 
 fn default_log_count() -> u32 {
@@ -88,6 +90,7 @@ impl Default for Config {
                     description: "同步 release 到 public".into(),
                 },
             ],
+            button_order: Vec::new(),
         }
     }
 }

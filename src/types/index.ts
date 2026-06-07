@@ -5,6 +5,7 @@ export interface Config {
   skipPushConfirm: boolean;
   logCount: number;
   mergeTemplates: MergeTemplate[];
+  buttonOrder: string[];
 }
 
 export interface CommitEntry {
