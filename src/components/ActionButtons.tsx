@@ -16,15 +16,18 @@ interface ActionDef {
 }
 
 const actions: ActionDef[] = [
-  { id: "fetch", label: "fetch" },
+  { id: "fetch", label: "更新远端" },
+  { id: "log", label: "日志" },
+  { id: "force-pull", label: "拉取" },
+  { id: "push", label: "推送" },
+  { id: "reset", label: "重置"},
   { id: "fetch-rebase", label: "Fetch & Rebase" },
-  { id: "switch", label: "switch" },
-  { id: "merge", label: "merge" },
-  { id: "push", label: "push" },
-  { id: "reset", label: "reset", danger: true },
-  { id: "force-pull", label: "pull" },
-  { id: "log", label: "show log" },
-  { id: "repair", label: "repair", danger: true },
+  { id: "switch", label: "切分支" },
+  { id: "one-key-start", label: "完整缓存" },
+  { id: "quick-start", label: "快速缓存" },
+  { id: "merge", label: "合并 & 同步" },
+  { id: "repair", label: "修复"},
+
 ];
 
 export const DEFAULT_ACTION_ORDER = actions.map((a) => a.id);
@@ -47,7 +50,12 @@ export default function ActionButtons({
   const orderRef = useRef(order);
   orderRef.current = order;
 
-  const sortedActions = order
+  const effectiveOrder = (() => {
+    const missing = actions.filter((a) => !order.includes(a.id)).map((a) => a.id);
+    return missing.length ? [...order, ...missing] : order;
+  })();
+
+  const sortedActions = effectiveOrder
     .map((id) => actionMap.get(id))
     .filter((a): a is ActionDef => !!a);
 

@@ -91,6 +91,40 @@ fn try_remove_lock_file(output: &str) -> bool {
     false
 }
 
+pub fn exec_bat(cwd: &str, script: &str) -> Result<(String, i32), String> {
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(["/C", script])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run script: {}", e))?;
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for script: {}", e))?;
+
+    Ok((String::new(), status.code().unwrap_or(-1)))
+}
+
+pub async fn run_bat(cwd: &str, script: &str) -> Result<(String, i32), String> {
+    let cwd = cwd.to_string();
+    let script = script.to_string();
+
+    tokio::task::spawn_blocking(move || exec_bat(&cwd, &script))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
 pub async fn run_git(cwd: &str, args: &[&str]) -> Result<(String, i32), String> {
     let cwd = cwd.to_string();
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();

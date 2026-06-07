@@ -7,10 +7,13 @@ import {
   gitFetchAll,
   gitFetchRebase,
   gitGetCurrentBranch,
+  gitSwitchBranch,
   gitPush,
   gitResetHard,
   gitForcePull,
   gitRepair,
+  runBatScript,
+  launchUnity,
 } from "./lib/commands";
 import ProjectSelector from "./components/ProjectSelector";
 import ActionButtons, { DEFAULT_ACTION_ORDER } from "./components/ActionButtons";
@@ -32,6 +35,8 @@ const ACTION_LABELS: Record<string, string> = {
   "force-pull": "更新分支",
   log: "查看日志",
   repair: "修复仓库",
+  "one-key-start": "一键启动",
+  "quick-start": "快速启动",
 };
 
 let logIdCounter = 0;
@@ -153,6 +158,14 @@ function App() {
       setActiveDialog("log");
       return;
     }
+    if (action === "one-key-start") {
+      handleOneKeyStart();
+      return;
+    }
+    if (action === "quick-start") {
+      handleQuickStart();
+      return;
+    }
 
     setLoadingAction(action);
     setLastResult(null);
@@ -262,6 +275,94 @@ function App() {
       else if (!succeeded && action !== "force-pull") setLastResult("error");
     }
   }, [config, loadingAction, addLog, refreshBranch, notify, handleUntrackedFiles]);
+
+  const handleOneKeyStart = useCallback(async () => {
+    if (!config?.currentProject) return;
+    const projectPath = config.currentProject;
+
+    if (loadingAction) {
+      addLog("warning", `当前正在${ACTION_LABELS[loadingAction] || loadingAction}，请等待完成`);
+      return;
+    }
+
+    setLoadingAction("one-key-start");
+    setLastResult(null);
+
+    const branch = await gitGetCurrentBranch(projectPath);
+
+    const steps = [
+      { label: "git fetch --all", fn: () => gitFetchAll(projectPath) },
+      { label: `切换到 origin/${branch}`, fn: async () => {
+        const r = await gitSwitchBranch(projectPath, branch, true);
+        if (!r.success) throw new Error(r.output || "切换失败");
+        return r.output;
+      }},
+      { label: "clean_data.bat", fn: () => runBatScript(projectPath, "clean_data.bat") },
+      { label: "clean_pull.bat", fn: () => runBatScript(projectPath, "clean_pull.bat") },
+      { label: "check_update_pkg.bat", fn: () => runBatScript(projectPath, "check_update_pkg.bat") },
+      { label: "clean_compile_cache.bat", fn: () => runBatScript(projectPath, "clean_compile_cache.bat") },
+      { label: "start_all_cross.bat", fn: () => runBatScript(projectPath, "start_all_cross.bat") },
+      { label: "启动 Unity", fn: () => launchUnity(projectPath) },
+    ];
+
+    let succeeded = false;
+    try {
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        addLog("command", `> [${i + 1}/${steps.length}] ${step.label}`);
+        const result = await step.fn();
+        addLog("success", result || `${step.label} 完成`);
+      }
+      await refreshBranch(projectPath);
+      await notify("Git 助手", "一键启动完成");
+      succeeded = true;
+    } catch (e) {
+      addLog("error", `一键启动失败: ${e}`);
+      await notify("Git 助手", `一键启动失败`);
+    } finally {
+      setLoadingAction(null);
+      setLastResult(succeeded ? "success" : "error");
+    }
+  }, [config, loadingAction, addLog, refreshBranch, notify]);
+
+  const handleQuickStart = useCallback(async () => {
+    if (!config?.currentProject) return;
+    const projectPath = config.currentProject;
+
+    if (loadingAction) {
+      addLog("warning", `当前正在${ACTION_LABELS[loadingAction] || loadingAction}，请等待完成`);
+      return;
+    }
+
+    setLoadingAction("quick-start");
+    setLastResult(null);
+
+    const steps = [
+      { label: "clean_pull.bat", fn: () => runBatScript(projectPath, "clean_pull.bat") },
+      { label: "check_update_pkg.bat", fn: () => runBatScript(projectPath, "check_update_pkg.bat") },
+      { label: "start_all_cross.bat", fn: () => runBatScript(projectPath, "start_all_cross.bat") },
+      { label: "启动 Unity", fn: () => launchUnity(projectPath) },
+    ];
+
+    let succeeded = false;
+    try {
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        addLog("command", `> [${i + 1}/${steps.length}] ${step.label}`);
+        const result = await step.fn();
+        addLog("success", result || `${step.label} 完成`);
+      }
+      await refreshBranch(projectPath);
+      await notify("Git 助手", "快速启动完成");
+      succeeded = true;
+    } catch (e) {
+      addLog("error", `快速启动失败: ${e}`);
+      await notify("Git 助手", `快速启动失败`);
+    } finally {
+      setLoadingAction(null);
+      setLastResult(succeeded ? "success" : "error");
+    }
+  }, [config, loadingAction, addLog, refreshBranch, notify]);
 
   const handleOrderChange = useCallback(async (newOrder: string[]) => {
     if (!config) return;

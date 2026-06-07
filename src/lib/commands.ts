@@ -76,3 +76,11 @@ export async function gitRepair(projectPath: string): Promise<string> {
 export async function gitFetchRebase(projectPath: string): Promise<RebaseResult> {
   return invoke<RebaseResult>('git_fetch_rebase', { projectPath });
 }
+
+export async function runBatScript(projectPath: string, scriptName: string): Promise<string> {
+  return invoke<string>('run_bat_script', { projectPath, scriptName });
+}
+
+export async function launchUnity(projectPath: string): Promise<string> {
+  return invoke<string>('launch_unity', { projectPath });
+}

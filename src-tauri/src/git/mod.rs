@@ -8,6 +8,7 @@ mod push;
 mod rebase;
 mod repair;
 mod reset;
+mod scripts;
 mod switch;
 
 pub use commit::{git_commit, git_commit_and_push};
@@ -19,4 +20,5 @@ pub use push::git_push;
 pub use rebase::git_fetch_rebase;
 pub use repair::git_repair;
 pub use reset::git_reset_hard;
+pub use scripts::{launch_unity, run_bat_script};
 pub use switch::{git_get_current_branch, git_list_remote_branches, git_switch_branch};
