@@ -146,22 +146,27 @@ function App() {
 
     const projectPath = config.currentProject;
 
+    // 【切分支】打开分支切换对话框
     if (action === "switch") {
       setActiveDialog("branch");
       return;
     }
+    // 【合并 & 同步】打开合并分支面板
     if (action === "merge") {
       setActiveDialog("merge");
       return;
     }
+    // 【日志】打开提交日志面板
     if (action === "log") {
       setActiveDialog("log");
       return;
     }
+    // 【完整缓存】执行完整启动流程（fetch → 切分支 → 清理 → 拉取 → 更新包 → 编译 → 启动）
     if (action === "one-key-start") {
       handleOneKeyStart();
       return;
     }
+    // 【快速缓存】跳过 fetch 和清理，仅拉取 → 更新包 → 启动
     if (action === "quick-start") {
       handleQuickStart();
       return;
@@ -172,6 +177,7 @@ function App() {
     let succeeded = false;
     try {
       switch (action) {
+        // 【更新远端】执行 git fetch --all，拉取所有远端分支最新引用
         case "fetch": {
           addLog("command", "> git fetch --all");
           const result = await gitFetchAll(projectPath);
@@ -181,6 +187,7 @@ function App() {
           succeeded = true;
           break;
         }
+        // 【Fetch & Rebase】先 fetch 再 rebase 到远端分支，遇冲突提示手动解决
         case "fetch-rebase": {
           addLog("command", "> git fetch && git rebase origin/<branch>");
           const rebaseResult = await gitFetchRebase(projectPath);
@@ -201,6 +208,7 @@ function App() {
           }
           break;
         }
+        // 【推送】将本地提交推送到远端
         case "push": {
           addLog("command", "> git push");
           const pushResult = await gitPush(projectPath);
@@ -209,6 +217,7 @@ function App() {
           succeeded = true;
           break;
         }
+        // 【重置】执行 git reset --hard，丢弃所有未提交的本地修改
         case "reset": {
           const confirmed = window.confirm("确定重置? 所有未提交修改将丢失");
           if (!confirmed) break;
@@ -220,6 +229,7 @@ function App() {
           succeeded = true;
           break;
         }
+        // 【修复仓库】执行 git fsck 检查 + git repack 重新打包，修复损坏的对象
         case "repair": {
           const confirmed = window.confirm("确定修复仓库? 将执行 fsck + repack，耗时较长");
           if (!confirmed) break;
@@ -230,6 +240,7 @@ function App() {
           succeeded = true;
           break;
         }
+        // 【拉取】强制拉取远端分支覆盖本地，若有未跟踪文件则提示用户确认删除
         case "force-pull": {
           addLog("command", "> git force pull");
           const result = await gitForcePull(projectPath, config.autoRemoveUntracked);
@@ -276,6 +287,7 @@ function App() {
     }
   }, [config, loadingAction, addLog, refreshBranch, notify, handleUntrackedFiles]);
 
+  // 【完整缓存】完整启动流程：fetch → 切到远端分支 → 依次执行清理/拉取/更新包/编译/启动脚本 → 打开 Unity
   const handleOneKeyStart = useCallback(async () => {
     if (!config?.currentProject) return;
     const projectPath = config.currentProject;
@@ -325,6 +337,7 @@ function App() {
     }
   }, [config, loadingAction, addLog, refreshBranch, notify]);
 
+  // 【快速缓存】精简启动流程：force-pull 强制拉取 → 启动脚本 → 打开 Unity
   const handleQuickStart = useCallback(async () => {
     if (!config?.currentProject) return;
     const projectPath = config.currentProject;
@@ -338,8 +351,11 @@ function App() {
     setLastResult(null);
 
     const steps = [
-      { label: "clean_pull.bat", fn: () => runBatScript(projectPath, "clean_pull.bat") },
-      { label: "check_update_pkg.bat", fn: () => runBatScript(projectPath, "check_update_pkg.bat") },
+      { label: "force pull", fn: async () => {
+        const r = await gitForcePull(projectPath, true);
+        if (!r.success) throw new Error(r.output || "强制拉取失败");
+        return r.output;
+      }},
       { label: "start_all_cross.bat", fn: () => runBatScript(projectPath, "start_all_cross.bat") },
       { label: "启动 Unity", fn: () => launchUnity(projectPath) },
     ];
