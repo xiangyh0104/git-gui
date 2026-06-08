@@ -1,27 +1,22 @@
 import { useState, useEffect, useCallback } from "react";
-import type { BranchInfo, GitOutput, LogEntry } from "../types";
-import { gitFetchAll, gitListRemoteBranches, gitSwitchBranch } from "../lib/commands";
+import type { BranchInfo, LogEntry } from "../types";
+import { gitListRemoteBranches } from "../lib/commands";
 
 interface Props {
   projectPath: string;
-  autoRemoveUntracked: boolean;
   onClose: () => void;
+  onStart: (branch: string) => void;
   onLog: (type: LogEntry["type"], message: string) => void;
-  onUntrackedFiles: (output: GitOutput, retryFn: () => Promise<void>) => void;
-  onRefresh: () => void;
 }
 
-export default function BranchSwitcher({
+export default function OneKeyStartDialog({
   projectPath,
-  autoRemoveUntracked,
   onClose,
+  onStart,
   onLog,
-  onUntrackedFiles,
-  onRefresh,
 }: Props) {
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [switching, setSwitching] = useState(false);
   const [showingAll, setShowingAll] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
   const [search, setSearch] = useState("");
@@ -42,15 +37,6 @@ export default function BranchSwitcher({
           setLoading(false);
         }
       }
-      try {
-        await gitFetchAll(projectPath);
-        if (!cancelled) {
-          const freshList = await gitListRemoteBranches(projectPath, false);
-          if (!cancelled) setBranches(freshList);
-        }
-      } catch {
-        // fetch failure is non-critical since we already have local data
-      }
     })();
     return () => { cancelled = true; };
   }, [projectPath, onLog]);
@@ -68,39 +54,6 @@ export default function BranchSwitcher({
     }
   }, [projectPath, onLog]);
 
-  const doSwitch = useCallback(async (branch: string) => {
-    setSwitching(true);
-    try {
-      onLog("command", `> git fetch && switch ${branch}`);
-      await gitFetchAll(projectPath);
-      const result = await gitSwitchBranch(projectPath, branch, autoRemoveUntracked);
-      if (result.needsUntrackedRemoval) {
-        onUntrackedFiles(result, async () => {
-          onLog("command", `> git switch ${branch} (auto-remove untracked)`);
-          const retry = await gitSwitchBranch(projectPath, branch, true);
-          if (retry.success) {
-            onLog("success", `已切换到分支 ${branch}`);
-            onRefresh();
-            onClose();
-          } else {
-            onLog("error", retry.output || "切换失败");
-          }
-        });
-        onClose();
-      } else if (result.success) {
-        onLog("success", `已切换到分支 ${branch}`);
-        onRefresh();
-        onClose();
-      } else {
-        onLog("error", result.output || "切换失败");
-      }
-    } catch (e) {
-      onLog("error", `切换分支失败: ${e}`);
-    } finally {
-      setSwitching(false);
-    }
-  }, [projectPath, autoRemoveUntracked, onLog, onUntrackedFiles, onRefresh, onClose]);
-
   const filteredBranches = branches.filter((b) =>
     b.name.toLowerCase().includes(search.toLowerCase())
   );
@@ -109,7 +62,7 @@ export default function BranchSwitcher({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>切换分支</h2>
+          <h2>一键启动 — 选择分支</h2>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
         <div className="modal-body">
@@ -134,7 +87,7 @@ export default function BranchSwitcher({
                     key={b.name}
                     className={`branch-item ${selected === b.name ? "selected" : ""}`}
                     onClick={() => setSelected(b.name)}
-                    onDoubleClick={() => doSwitch(b.name)}
+                    onDoubleClick={() => onStart(b.name)}
                   >
                     <div className="branch-item-info">
                       <div className="branch-item-name">{b.name}</div>
@@ -171,10 +124,10 @@ export default function BranchSwitcher({
           <button className="btn btn-secondary" onClick={onClose}>取消</button>
           <button
             className="btn btn-primary"
-            onClick={() => selected && doSwitch(selected)}
-            disabled={!selected || switching}
+            onClick={() => selected && onStart(selected)}
+            disabled={!selected}
           >
-            {switching ? "切换中..." : "确认切换"}
+            开始启动
           </button>
         </div>
       </div>
