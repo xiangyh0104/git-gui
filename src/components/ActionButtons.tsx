@@ -53,12 +53,12 @@ export default function ActionButtons({
   const rectsRef = useRef<DOMRect[]>([]);
   const overIdxRef = useRef<number | null>(null);
   const orderRef = useRef(order);
-  orderRef.current = order;
 
   const effectiveOrder = (() => {
     const missing = actions.filter((a) => !order.includes(a.id)).map((a) => a.id);
     return missing.length ? [...order, ...missing] : order;
   })();
+  orderRef.current = effectiveOrder;
 
   const sortedActions = effectiveOrder
     .map((id) => actionMap.get(id))
