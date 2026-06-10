@@ -7,6 +7,7 @@ interface Props {
   loadingAction: string | null;
   order: string[];
   onOrderChange: (order: string[]) => void;
+  queueCounts?: Record<string, number>;
 }
 
 interface ActionDef {
@@ -24,7 +25,10 @@ const actions: ActionDef[] = [
   { id: "fetch-rebase", label: "Fetch & Rebase" },
   { id: "switch", label: "切分支" },
   { id: "one-key-start", label: "完整缓存" },
-  { id: "quick-start", label: "快速缓存" },
+  { id: "start-server", label: "启动2服" },
+  { id: "start-client", label: "启动客户端" },
+  { id: "checkout-discard", label: "回退改动" },
+  { id: "undo-commit", label: "取消commit" },
   { id: "merge", label: "合并 & 同步" },
   { id: "repair", label: "修复"},
 
@@ -40,6 +44,7 @@ export default function ActionButtons({
   loadingAction,
   order,
   onOrderChange,
+  queueCounts = {},
 }: Props) {
   const [sortMode, setSortMode] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -142,6 +147,9 @@ export default function ActionButtons({
             {sortMode && <span className="drag-handle">⋮⋮</span>}
             {loadingAction === action.id ? <div className="spinner" /> : null}
             <span className="action-label">{action.label}</span>
+            {!sortMode && queueCounts[action.id] > 0 && (
+              <span className="queue-badge">{queueCounts[action.id]}</span>
+            )}
           </button>
         ))}
       </div>

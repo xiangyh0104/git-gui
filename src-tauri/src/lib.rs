@@ -4,8 +4,9 @@ mod git;
 use config::{add_project, get_config, remove_project, save_config};
 use git::{
     git_abort_merge, git_commit, git_commit_and_push, git_fetch_all, git_fetch_rebase,
-    git_force_pull, git_get_current_branch, git_list_remote_branches, git_log, git_merge_branch,
-    git_push, git_repair, git_reset_hard, git_switch_branch, git_sync_before_merge,
+    git_checkout_discard, git_force_pull, git_get_current_branch, git_list_remote_branches,
+    git_log, git_merge_branch, git_push, git_repair, git_reset_hard, git_switch_branch,
+    git_sync_before_merge, git_undo_commit,
     launch_unity, run_bat_script,
 };
 use tauri::Manager;
@@ -39,6 +40,8 @@ pub fn run() {
             git_log,
             git_abort_merge,
             git_reset_hard,
+            git_checkout_discard,
+            git_undo_commit,
             git_force_pull,
             git_repair,
             run_bat_script,

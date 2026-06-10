@@ -9,6 +9,7 @@ interface Props {
   onLog: (type: LogEntry["type"], message: string) => void;
   onUntrackedFiles: (output: GitOutput, retryFn: () => Promise<void>) => void;
   onRefresh: () => void;
+  onEnqueue?: (branch: string) => void;
 }
 
 export default function BranchSwitcher({
@@ -18,6 +19,7 @@ export default function BranchSwitcher({
   onLog,
   onUntrackedFiles,
   onRefresh,
+  onEnqueue,
 }: Props) {
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,7 +136,10 @@ export default function BranchSwitcher({
                     key={b.name}
                     className={`branch-item ${selected === b.name ? "selected" : ""}`}
                     onClick={() => setSelected(b.name)}
-                    onDoubleClick={() => doSwitch(b.name)}
+                    onDoubleClick={() => {
+                      if (onEnqueue) { onEnqueue(b.name); onClose(); }
+                      else doSwitch(b.name);
+                    }}
                   >
                     <div className="branch-item-info">
                       <div className="branch-item-name">{b.name}</div>
@@ -171,10 +176,14 @@ export default function BranchSwitcher({
           <button className="btn btn-secondary" onClick={onClose}>取消</button>
           <button
             className="btn btn-primary"
-            onClick={() => selected && doSwitch(selected)}
+            onClick={() => {
+              if (!selected) return;
+              if (onEnqueue) { onEnqueue(selected); onClose(); }
+              else doSwitch(selected);
+            }}
             disabled={!selected || switching}
           >
-            {switching ? "切换中..." : "确认切换"}
+            {switching ? "切换中..." : onEnqueue ? "加入队列" : "确认切换"}
           </button>
         </div>
       </div>

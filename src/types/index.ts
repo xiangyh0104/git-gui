@@ -59,3 +59,12 @@ export interface LogEntry {
   type: 'info' | 'success' | 'error' | 'warning' | 'command';
   message: string;
 }
+
+export interface QueueItem {
+  id: number;
+  action: string;
+  label: string;
+  targetBranch: string;
+  projectPath: string;
+  switchTarget?: string;
+}

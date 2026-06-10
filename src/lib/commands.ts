@@ -65,6 +65,14 @@ export async function gitResetHard(projectPath: string): Promise<string> {
   return invoke<string>('git_reset_hard', { projectPath });
 }
 
+export async function gitCheckoutDiscard(projectPath: string): Promise<string> {
+  return invoke<string>('git_checkout_discard', { projectPath });
+}
+
+export async function gitUndoCommit(projectPath: string): Promise<string> {
+  return invoke<string>('git_undo_commit', { projectPath });
+}
+
 export async function gitForcePull(projectPath: string, autoRemove: boolean): Promise<GitOutput> {
   return invoke<GitOutput>('git_force_pull', { projectPath, autoRemove });
 }

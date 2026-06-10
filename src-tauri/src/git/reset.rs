@@ -1,6 +1,24 @@
 use super::common::{get_stash_mark_path, run_git};
 
 #[tauri::command]
+pub async fn git_checkout_discard(project_path: String) -> Result<String, String> {
+    let (output, code) = run_git(&project_path, &["checkout", "--", "."]).await?;
+    if code != 0 {
+        return Err(format!("git checkout -- . failed: {}", output));
+    }
+    Ok(output)
+}
+
+#[tauri::command]
+pub async fn git_undo_commit(project_path: String) -> Result<String, String> {
+    let (output, code) = run_git(&project_path, &["reset", "--mixed", "HEAD~1"]).await?;
+    if code != 0 {
+        return Err(format!("git reset --mixed HEAD~1 failed: {}", output));
+    }
+    Ok(output)
+}
+
+#[tauri::command]
 pub async fn git_reset_hard(project_path: String) -> Result<String, String> {
     let rebase_merge = std::path::Path::new(&project_path).join(".git/rebase-merge");
     let rebase_apply = std::path::Path::new(&project_path).join(".git/rebase-apply");

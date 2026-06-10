@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { Config, LogEntry, GitOutput } from "./types";
 import {
@@ -10,6 +10,8 @@ import {
   gitSwitchBranch,
   gitPush,
   gitResetHard,
+  gitCheckoutDiscard,
+  gitUndoCommit,
   gitForcePull,
   gitRepair,
   runBatScript,
@@ -24,6 +26,8 @@ import Settings from "./components/Settings";
 import UntrackedFilesDialog from "./components/UntrackedFilesDialog";
 import CommitLogPanel from "./components/CommitLogPanel";
 import StatusAnimation from "./components/StatusAnimation";
+import QueuePanel from "./components/QueuePanel";
+import useActionQueue from "./hooks/useActionQueue";
 
 const ACTION_LABELS: Record<string, string> = {
   fetch: "拉取远端",
@@ -36,7 +40,17 @@ const ACTION_LABELS: Record<string, string> = {
   log: "查看日志",
   repair: "修复仓库",
   "one-key-start": "一键启动",
-  "quick-start": "快速启动",
+  "start-server": "启动2服",
+  "start-client": "启动客户端",
+  "checkout-discard": "回退改动",
+  "undo-commit": "取消commit",
+};
+
+const CONFIRM_ACTIONS: Record<string, string> = {
+  reset: "确定重置? 所有未提交修改将丢失",
+  repair: "确定修复仓库? 将执行 fsck + repack，耗时较长",
+  "checkout-discard": "确定回退所有改动? 未提交的修改将丢失",
+  "undo-commit": "确定取消最近一次 commit? 改动会保留在工作区",
 };
 
 let logIdCounter = 0;
@@ -54,6 +68,14 @@ function App() {
     onCancel: () => void;
   } | null>(null);
 
+  const { queue, enqueue, cancelItem, clearQueue, dequeue } = useActionQueue();
+
+  const currentBranchRef = useRef(currentBranch);
+  currentBranchRef.current = currentBranch;
+  const configRef = useRef(config);
+  configRef.current = config;
+  const processingQueueRef = useRef(false);
+
   const loading = !!loadingAction;
 
   const addLog = useCallback((type: LogEntry["type"], message: string) => {
@@ -66,14 +88,20 @@ function App() {
 
   const notify = useCallback(async (title: string, body: string) => {
     try {
-      let granted = await isPermissionGranted();
-      if (!granted) {
-        const permission = await requestPermission();
-        granted = permission === "granted";
-      }
-      if (granted) {
-        sendNotification({ title, body });
-      }
+      const result = await Promise.race([
+        (async () => {
+          let granted = await isPermissionGranted();
+          if (!granted) {
+            const permission = await requestPermission();
+            granted = permission === "granted";
+          }
+          if (granted) {
+            sendNotification({ title, body });
+          }
+        })(),
+        new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+      ]);
+      void result;
     } catch {
       // notification not available
     }
@@ -133,51 +161,12 @@ function App() {
     });
   }, [addLog]);
 
-  const handleAction = useCallback(async (action: string) => {
-    if (!config?.currentProject) {
-      addLog("warning", "请先选择一个项目目录");
-      return;
-    }
-
-    if (loadingAction) {
-      addLog("warning", `当前正在${ACTION_LABELS[loadingAction] || loadingAction}，请等待完成`);
-      return;
-    }
-
-    const projectPath = config.currentProject;
-
-    // 【切分支】打开分支切换对话框
-    if (action === "switch") {
-      setActiveDialog("branch");
-      return;
-    }
-    // 【合并 & 同步】打开合并分支面板
-    if (action === "merge") {
-      setActiveDialog("merge");
-      return;
-    }
-    // 【日志】打开提交日志面板
-    if (action === "log") {
-      setActiveDialog("log");
-      return;
-    }
-    // 【完整缓存】执行完整启动流程（fetch → 切分支 → 清理 → 拉取 → 更新包 → 编译 → 启动）
-    if (action === "one-key-start") {
-      handleOneKeyStart();
-      return;
-    }
-    // 【快速缓存】跳过 fetch 和清理，仅拉取 → 更新包 → 启动
-    if (action === "quick-start") {
-      handleQuickStart();
-      return;
-    }
-
+  const executeAction = useCallback(async (action: string, projectPath: string) => {
     setLoadingAction(action);
     setLastResult(null);
     let succeeded = false;
     try {
       switch (action) {
-        // 【更新远端】执行 git fetch --all，拉取所有远端分支最新引用
         case "fetch": {
           addLog("command", "> git fetch --all");
           const result = await gitFetchAll(projectPath);
@@ -187,7 +176,6 @@ function App() {
           succeeded = true;
           break;
         }
-        // 【Fetch & Rebase】先 fetch 再 rebase 到远端分支，遇冲突提示手动解决
         case "fetch-rebase": {
           addLog("command", "> git fetch && git rebase origin/<branch>");
           const rebaseResult = await gitFetchRebase(projectPath);
@@ -208,7 +196,6 @@ function App() {
           }
           break;
         }
-        // 【推送】将本地提交推送到远端
         case "push": {
           addLog("command", "> git push");
           const pushResult = await gitPush(projectPath);
@@ -217,10 +204,7 @@ function App() {
           succeeded = true;
           break;
         }
-        // 【重置】执行 git reset --hard，丢弃所有未提交的本地修改
         case "reset": {
-          const confirmed = window.confirm("确定重置? 所有未提交修改将丢失");
-          if (!confirmed) break;
           addLog("command", "> git reset --hard");
           const result = await gitResetHard(projectPath);
           addLog("success", result || "重置完成");
@@ -229,10 +213,7 @@ function App() {
           succeeded = true;
           break;
         }
-        // 【修复仓库】执行 git fsck 检查 + git repack 重新打包，修复损坏的对象
         case "repair": {
-          const confirmed = window.confirm("确定修复仓库? 将执行 fsck + repack，耗时较长");
-          if (!confirmed) break;
           addLog("command", "> git fsck && git repack -a -d -f");
           const repairResult = await gitRepair(projectPath);
           addLog("info", repairResult);
@@ -240,33 +221,46 @@ function App() {
           succeeded = true;
           break;
         }
-        // 【拉取】强制拉取远端分支覆盖本地，若有未跟踪文件则提示用户确认删除
+        case "checkout-discard": {
+          addLog("command", "> git checkout -- .");
+          const discardResult = await gitCheckoutDiscard(projectPath);
+          addLog("success", discardResult || "回退改动完成");
+          await notify("Git 助手", "回退改动完成");
+          succeeded = true;
+          break;
+        }
+        case "undo-commit": {
+          addLog("command", "> git reset --mixed HEAD~1");
+          const undoResult = await gitUndoCommit(projectPath);
+          addLog("success", undoResult || "取消 commit 完成");
+          await notify("Git 助手", "取消 commit 完成");
+          succeeded = true;
+          break;
+        }
         case "force-pull": {
           addLog("command", "> git force pull");
-          const result = await gitForcePull(projectPath, config.autoRemoveUntracked);
+          const result = await gitForcePull(projectPath, configRef.current?.autoRemoveUntracked ?? false);
           if (result.needsUntrackedRemoval) {
-            handleUntrackedFiles(result, async () => {
-              setLoadingAction("force-pull");
-              setLastResult(null);
-              try {
-                addLog("command", "> git force pull (auto-remove untracked)");
-                const retry = await gitForcePull(projectPath, true);
-                if (retry.success) {
-                  addLog("success", retry.output || "更新完成");
-                  await notify("Git 助手", "分支更新完成");
-                  setLastResult("success");
-                } else {
-                  addLog("error", retry.output || "更新失败");
-                  setLastResult("error");
-                }
-              } catch (e) {
-                addLog("error", `更新失败: ${e}`);
-                setLastResult("error");
-              } finally {
-                setLoadingAction(null);
-                await refreshBranch(projectPath);
-              }
+            const userConfirmed = await new Promise<boolean>((resolve) => {
+              setUntrackedDialog({
+                files: result.untrackedFiles,
+                onConfirm: () => { setUntrackedDialog(null); resolve(true); },
+                onCancel: () => { setUntrackedDialog(null); resolve(false); },
+              });
             });
+            if (userConfirmed) {
+              addLog("command", "> git force pull (auto-remove untracked)");
+              const retry = await gitForcePull(projectPath, true);
+              if (retry.success) {
+                addLog("success", retry.output || "更新完成");
+                await notify("Git 助手", "分支更新完成");
+                succeeded = true;
+              } else {
+                addLog("error", retry.output || "更新失败");
+              }
+            } else {
+              addLog("warning", "操作已取消，未跟踪文件未移除");
+            }
           } else if (result.success) {
             addLog("success", result.output || "更新完成");
             await notify("Git 助手", "分支更新完成");
@@ -283,20 +277,57 @@ function App() {
     } finally {
       setLoadingAction(null);
       if (succeeded) setLastResult("success");
-      else if (!succeeded && action !== "force-pull") setLastResult("error");
+      else if (action !== "force-pull") setLastResult("error");
     }
-  }, [config, loadingAction, addLog, refreshBranch, notify, handleUntrackedFiles]);
+  }, [addLog, refreshBranch, notify]);
 
-  // 【完整缓存】完整启动流程：fetch → 切到远端分支 → 依次执行清理/拉取/更新包/编译/启动脚本 → 打开 Unity
-  const handleOneKeyStart = useCallback(async () => {
-    if (!config?.currentProject) return;
-    const projectPath = config.currentProject;
-
-    if (loadingAction) {
-      addLog("warning", `当前正在${ACTION_LABELS[loadingAction] || loadingAction}，请等待完成`);
-      return;
+  const executeSwitchAction = useCallback(async (projectPath: string, targetBranch: string) => {
+    setLoadingAction("switch");
+    setLastResult(null);
+    let succeeded = false;
+    try {
+      addLog("command", `> git fetch && switch ${targetBranch}`);
+      await gitFetchAll(projectPath);
+      const result = await gitSwitchBranch(projectPath, targetBranch, configRef.current?.autoRemoveUntracked ?? false);
+      if (result.needsUntrackedRemoval) {
+        const userConfirmed = await new Promise<boolean>((resolve) => {
+          setUntrackedDialog({
+            files: result.untrackedFiles,
+            onConfirm: () => { setUntrackedDialog(null); resolve(true); },
+            onCancel: () => { setUntrackedDialog(null); resolve(false); },
+          });
+        });
+        if (userConfirmed) {
+          addLog("command", `> git switch ${targetBranch} (auto-remove untracked)`);
+          const retry = await gitSwitchBranch(projectPath, targetBranch, true);
+          if (retry.success) {
+            addLog("success", `已切换到分支 ${targetBranch}`);
+            await refreshBranch(projectPath);
+            await notify("Git 助手", `已切换到 ${targetBranch}`);
+            succeeded = true;
+          } else {
+            addLog("error", retry.output || "切换失败");
+          }
+        } else {
+          addLog("warning", "切换已取消");
+        }
+      } else if (result.success) {
+        addLog("success", `已切换到分支 ${targetBranch}`);
+        await refreshBranch(projectPath);
+        await notify("Git 助手", `已切换到 ${targetBranch}`);
+        succeeded = true;
+      } else {
+        addLog("error", result.output || "切换失败");
+      }
+    } catch (e) {
+      addLog("error", `切换分支失败: ${e}`);
+    } finally {
+      setLoadingAction(null);
+      setLastResult(succeeded ? "success" : "error");
     }
+  }, [addLog, refreshBranch, notify]);
 
+  const runOneKeyStart = useCallback(async (projectPath: string) => {
     setLoadingAction("one-key-start");
     setLastResult(null);
 
@@ -335,50 +366,181 @@ function App() {
       setLoadingAction(null);
       setLastResult(succeeded ? "success" : "error");
     }
-  }, [config, loadingAction, addLog, refreshBranch, notify]);
+  }, [addLog, refreshBranch, notify]);
 
-  // 【快速缓存】精简启动流程：force-pull 强制拉取 → 启动脚本 → 打开 Unity
-  const handleQuickStart = useCallback(async () => {
-    if (!config?.currentProject) return;
-    const projectPath = config.currentProject;
-
-    if (loadingAction) {
-      addLog("warning", `当前正在${ACTION_LABELS[loadingAction] || loadingAction}，请等待完成`);
-      return;
-    }
-
-    setLoadingAction("quick-start");
+  const runStartServer = useCallback(async (projectPath: string) => {
+    setLoadingAction("start-server");
     setLastResult(null);
-
-    const steps = [
-      { label: "force pull", fn: async () => {
-        const r = await gitForcePull(projectPath, true);
-        if (!r.success) throw new Error(r.output || "强制拉取失败");
-        return r.output;
-      }},
-      { label: "start_all_cross.bat", fn: () => runBatScript(projectPath, "start_all_cross.bat") },
-      { label: "启动 Unity", fn: () => launchUnity(projectPath) },
-    ];
-
     let succeeded = false;
     try {
-      for (let i = 0; i < steps.length; i++) {
-        const step = steps[i];
-        addLog("command", `> [${i + 1}/${steps.length}] ${step.label}`);
-        const result = await step.fn();
-        addLog("success", result || `${step.label} 完成`);
-      }
-      await refreshBranch(projectPath);
-      await notify("Git 助手", "快速启动完成");
+      addLog("command", "> start_all_cross.bat");
+      const result = await runBatScript(projectPath, "start_all_cross.bat");
+      addLog("success", result || "启动2服完成");
+      await notify("Git 助手", "启动2服完成");
       succeeded = true;
     } catch (e) {
-      addLog("error", `快速启动失败: ${e}`);
-      await notify("Git 助手", `快速启动失败`);
+      addLog("error", `启动2服失败: ${e}`);
+      await notify("Git 助手", "启动2服失败");
     } finally {
       setLoadingAction(null);
       setLastResult(succeeded ? "success" : "error");
     }
-  }, [config, loadingAction, addLog, refreshBranch, notify]);
+  }, [addLog, notify]);
+
+  const runStartClient = useCallback(async (projectPath: string) => {
+    setLoadingAction("start-client");
+    setLastResult(null);
+    let succeeded = false;
+    try {
+      addLog("command", "> 启动 Unity");
+      const result = await launchUnity(projectPath);
+      addLog("success", result || "启动客户端完成");
+      await notify("Git 助手", "启动客户端完成");
+      succeeded = true;
+    } catch (e) {
+      addLog("error", `启动客户端失败: ${e}`);
+      await notify("Git 助手", "启动客户端失败");
+    } finally {
+      setLoadingAction(null);
+      setLastResult(succeeded ? "success" : "error");
+    }
+  }, [addLog, notify]);
+
+  // Process next queue item when the current action completes
+  useEffect(() => {
+    if (loadingAction !== null) {
+      processingQueueRef.current = false;
+      return;
+    }
+    if (queue.length === 0 || activeDialog === "merge") return;
+    if (processingQueueRef.current) return;
+    processingQueueRef.current = true;
+
+    const next = dequeue();
+    if (!next) { processingQueueRef.current = false; return; }
+
+    (async () => {
+      const projectPath = next.projectPath;
+
+      // Auto-switch branch if needed (switch actions handle their own branch)
+      if (next.action !== "switch" && next.targetBranch && next.targetBranch !== currentBranchRef.current) {
+        setLoadingAction(next.action);
+        addLog("command", `> 队列自动切换到 ${next.targetBranch}`);
+        try {
+          const result = await gitSwitchBranch(
+            projectPath,
+            next.targetBranch,
+            configRef.current?.autoRemoveUntracked ?? false,
+          );
+          if (result.needsUntrackedRemoval) {
+            const confirmed = await new Promise<boolean>((resolve) => {
+              setUntrackedDialog({
+                files: result.untrackedFiles,
+                onConfirm: () => { setUntrackedDialog(null); resolve(true); },
+                onCancel: () => { setUntrackedDialog(null); resolve(false); },
+              });
+            });
+            if (confirmed) {
+              const retry = await gitSwitchBranch(projectPath, next.targetBranch, true);
+              if (!retry.success) {
+                addLog("error", `自动切换分支失败: ${retry.output}`);
+                addLog("warning", "队列已停止");
+                clearQueue();
+                setLoadingAction(null);
+                setLastResult("error");
+                return;
+              }
+            } else {
+              addLog("warning", "自动切换已取消，队列已停止");
+              clearQueue();
+              setLoadingAction(null);
+              setLastResult("error");
+              return;
+            }
+          } else if (!result.success) {
+            addLog("error", `自动切换分支失败: ${result.output}`);
+            addLog("warning", "队列已停止");
+            clearQueue();
+            setLoadingAction(null);
+            setLastResult("error");
+            return;
+          }
+          setCurrentBranch(next.targetBranch);
+          addLog("success", `已切换到 ${next.targetBranch}`);
+        } catch (e) {
+          addLog("error", `自动切换分支失败: ${e}`);
+          addLog("warning", "队列已停止");
+          clearQueue();
+          setLoadingAction(null);
+          setLastResult("error");
+          return;
+        }
+        setLoadingAction(null);
+      }
+
+      if (next.action === "switch" && next.switchTarget) {
+        executeSwitchAction(projectPath, next.switchTarget);
+      } else if (next.action === "one-key-start") {
+        runOneKeyStart(projectPath);
+      } else if (next.action === "start-server") {
+        runStartServer(projectPath);
+      } else if (next.action === "start-client") {
+        runStartClient(projectPath);
+      } else {
+        executeAction(next.action, projectPath);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingAction, queue.length, activeDialog]);
+
+  const handleAction = useCallback(async (action: string) => {
+    if (!config?.currentProject) {
+      addLog("warning", "请先选择一个项目目录");
+      return;
+    }
+
+    const projectPath = config.currentProject;
+
+    if (action === "switch") {
+      setActiveDialog("branch");
+      return;
+    }
+    if (action === "merge") {
+      setActiveDialog("merge");
+      return;
+    }
+    if (action === "log") {
+      setActiveDialog("log");
+      return;
+    }
+
+    if (CONFIRM_ACTIONS[action]) {
+      if (!window.confirm(CONFIRM_ACTIONS[action])) return;
+    }
+
+    if (loadingAction) {
+      const label = ACTION_LABELS[action] || action;
+      enqueue(action, label, currentBranch, projectPath);
+      addLog("info", `已加入队列: ${label} (${currentBranch})`);
+      return;
+    }
+
+    if (action === "one-key-start") {
+      runOneKeyStart(projectPath);
+    } else if (action === "start-server") {
+      runStartServer(projectPath);
+    } else if (action === "start-client") {
+      runStartClient(projectPath);
+    } else {
+      executeAction(action, projectPath);
+    }
+  }, [config, loadingAction, currentBranch, addLog, enqueue, executeAction, runOneKeyStart, runStartServer, runStartClient]);
+
+  const handleEnqueueSwitch = useCallback((targetBranch: string) => {
+    if (!config?.currentProject) return;
+    enqueue("switch", `切换 → ${targetBranch}`, currentBranch, config.currentProject, targetBranch);
+    addLog("info", `已加入队列: 切换分支 → ${targetBranch}`);
+  }, [config?.currentProject, currentBranch, enqueue, addLog]);
 
   const handleOrderChange = useCallback(async (newOrder: string[]) => {
     if (!config) return;
@@ -421,11 +583,24 @@ function App() {
           loadingAction={loadingAction}
           order={config?.buttonOrder?.length ? config.buttonOrder : DEFAULT_ACTION_ORDER}
           onOrderChange={handleOrderChange}
+          queueCounts={queue.reduce<Record<string, number>>((acc, item) => {
+            acc[item.action] = (acc[item.action] || 0) + 1;
+            return acc;
+          }, {})}
         />
 
         <div className="main-content">
           <StatusAnimation loadingAction={loadingAction} lastResult={lastResult} />
-          <LogViewer logs={logs} onClear={clearLogs} />
+          <div className="content-row">
+            <LogViewer logs={logs} onClear={clearLogs} />
+            {queue.length > 0 && (
+              <QueuePanel
+                queue={queue}
+                onCancel={cancelItem}
+                onClear={clearQueue}
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -437,6 +612,7 @@ function App() {
           onLog={addLog}
           onUntrackedFiles={handleUntrackedFiles}
           onRefresh={() => refreshBranch()}
+          onEnqueue={loading ? handleEnqueueSwitch : undefined}
         />
       )}
 
