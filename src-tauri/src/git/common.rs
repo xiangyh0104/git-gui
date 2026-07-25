@@ -125,6 +125,224 @@ pub async fn run_bat(cwd: &str, script: &str) -> Result<(String, i32), String> {
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
+pub fn exec_bat_detached(cwd: &str, script: &str) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(["/C", script])
+        .current_dir(cwd);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x00000010); // CREATE_NEW_CONSOLE
+    }
+
+    cmd.spawn()
+        .map_err(|e| format!("Failed to launch script: {}", e))?;
+
+    Ok(())
+}
+
+pub async fn run_bat_detached(cwd: &str, script: &str) -> Result<(), String> {
+    let cwd = cwd.to_string();
+    let script = script.to_string();
+
+    tokio::task::spawn_blocking(move || exec_bat_detached(&cwd, &script))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+pub fn exec_bat_with_input(cwd: &str, script: &str, stdin_input: Option<&str>) -> Result<(String, i32), String> {
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(["/C", script]).current_dir(cwd);
+
+    if stdin_input.is_some() {
+        cmd.stdin(std::process::Stdio::piped());
+    } else {
+        cmd.stdin(std::process::Stdio::null());
+    }
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run script: {}", e))?;
+
+    if let Some(input) = stdin_input {
+        use std::io::Write;
+        if let Some(mut stdin_handle) = child.stdin.take() {
+            let _ = stdin_handle.write_all(input.as_bytes());
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for script: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = if stderr.is_empty() {
+        stdout
+    } else {
+        format!("{}\n{}", stdout.trim(), stderr.trim())
+    };
+    Ok((combined, output.status.code().unwrap_or(-1)))
+}
+
+pub fn exec_bat_streaming<F>(
+    cwd: &str,
+    script: &str,
+    stdin_input: Option<&str>,
+    on_line: F,
+) -> Result<i32, String>
+where
+    F: Fn(&str) + Send + Sync + 'static,
+{
+    use std::io::{BufRead, BufReader, Write};
+    use std::sync::Arc;
+
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(["/C", script]).current_dir(cwd);
+
+    if stdin_input.is_some() {
+        cmd.stdin(std::process::Stdio::piped());
+    } else {
+        cmd.stdin(std::process::Stdio::null());
+    }
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run script: {}", e))?;
+
+    let child_pid = child.id();
+
+    if let Some(input) = stdin_input {
+        if let Some(mut stdin_handle) = child.stdin.take() {
+            let _ = stdin_handle.write_all(input.as_bytes());
+            drop(stdin_handle);
+        }
+    }
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let on_line = Arc::new(on_line);
+
+    let stdout_handle = stdout.map(|out| {
+        let cb = Arc::clone(&on_line);
+        std::thread::spawn(move || {
+            let reader = BufReader::new(out);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => cb(&l),
+                    Err(_) => break,
+                }
+            }
+        })
+    });
+
+    let stderr_handle = stderr.map(|err| {
+        let cb = Arc::clone(&on_line);
+        std::thread::spawn(move || {
+            let reader = BufReader::new(err);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => cb(&l),
+                    Err(_) => break,
+                }
+            }
+        })
+    });
+
+    let status = child.wait().map_err(|e| format!("Failed to wait for script: {}", e))?;
+    let code = status.code().unwrap_or(-1);
+
+    // Process exited. Wait briefly for reader threads to finish draining
+    // buffered output. If orphaned child processes keep pipes open,
+    // kill the process tree so readers can unblock.
+    let drain_timeout = std::time::Duration::from_secs(3);
+    let start = std::time::Instant::now();
+
+    let stdout_done = stdout_handle.map(|h| {
+        Arc::new((std::sync::Mutex::new(Some(h)), std::sync::atomic::AtomicBool::new(false)))
+    });
+    let stderr_done = stderr_handle.map(|h| {
+        Arc::new((std::sync::Mutex::new(Some(h)), std::sync::atomic::AtomicBool::new(false)))
+    });
+
+    // Spawn a monitor that joins readers and marks them done
+    let sd = stdout_done.clone();
+    let ed = stderr_done.clone();
+    std::thread::spawn(move || {
+        if let Some(ref sd) = sd {
+            if let Some(h) = sd.0.lock().unwrap().take() {
+                let _ = h.join();
+            }
+            sd.1.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if let Some(ref ed) = ed {
+            if let Some(h) = ed.0.lock().unwrap().take() {
+                let _ = h.join();
+            }
+            ed.1.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+
+    loop {
+        let all_done = stdout_done.as_ref().map_or(true, |s| s.1.load(std::sync::atomic::Ordering::Relaxed))
+            && stderr_done.as_ref().map_or(true, |s| s.1.load(std::sync::atomic::Ordering::Relaxed));
+        if all_done {
+            break;
+        }
+        if start.elapsed() > drain_timeout {
+            kill_process_tree(child_pid);
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    Ok(code)
+}
+
+#[cfg(target_os = "windows")]
+fn kill_process_tree(pid: u32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_process_tree(pid: u32) {
+    unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+}
+
+pub async fn run_bat_with_input(cwd: &str, script: &str, stdin_input: Option<&str>) -> Result<(String, i32), String> {
+    let cwd = cwd.to_string();
+    let script = script.to_string();
+    let input = stdin_input.map(|s| s.to_string());
+
+    tokio::task::spawn_blocking(move || exec_bat_with_input(&cwd, &script, input.as_deref()))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
 pub async fn run_git(cwd: &str, args: &[&str]) -> Result<(String, i32), String> {
     let cwd = cwd.to_string();
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();

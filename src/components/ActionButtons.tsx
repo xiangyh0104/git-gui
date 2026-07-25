@@ -30,6 +30,10 @@ const actions: ActionDef[] = [
   { id: "checkout-discard", label: "回退改动" },
   { id: "undo-commit", label: "取消commit" },
   { id: "merge", label: "合并 & 同步" },
+  { id: "import-external", label: "导入外网" },
+  { id: "clean-data", label: "清档" },
+  { id: "quick-convert", label: "快速转表" },
+  { id: "launch-server", label: "启动服务器" },
   { id: "repair", label: "修复"},
 
 ];

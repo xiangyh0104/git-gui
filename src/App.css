@@ -638,6 +638,25 @@ body {
   border-top: 1px solid var(--border);
 }
 
+.input-dialog-textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.input-dialog-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* Form Elements */
 .input {
   width: 100%;
@@ -1259,4 +1278,34 @@ textarea.input {
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
+}
+
+/* Server launcher grid */
+.server-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.btn-server {
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-server:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.btn-server:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

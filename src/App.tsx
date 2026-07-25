@@ -15,6 +15,9 @@ import {
   gitForcePull,
   gitRepair,
   runBatScript,
+  launchBatScript,
+  runProjectScript,
+  runImportExternalStreaming,
   launchUnity,
 } from "./lib/commands";
 import ProjectSelector from "./components/ProjectSelector";
@@ -24,6 +27,8 @@ import BranchSwitcher from "./components/BranchSwitcher";
 import MergePanel from "./components/MergePanel";
 import Settings from "./components/Settings";
 import UntrackedFilesDialog from "./components/UntrackedFilesDialog";
+import InputDialog from "./components/InputDialog";
+import ServerLauncherDialog from "./components/ServerLauncherDialog";
 import CommitLogPanel from "./components/CommitLogPanel";
 import StatusAnimation from "./components/StatusAnimation";
 import QueuePanel from "./components/QueuePanel";
@@ -44,6 +49,10 @@ const ACTION_LABELS: Record<string, string> = {
   "start-client": "启动客户端",
   "checkout-discard": "回退改动",
   "undo-commit": "取消commit",
+  "import-external": "导入外网",
+  "clean-data": "清档",
+  "quick-convert": "快速转表",
+  "launch-server": "启动服务器",
 };
 
 const CONFIRM_ACTIONS: Record<string, string> = {
@@ -61,7 +70,7 @@ function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<"success" | "error" | null>(null);
-  const [activeDialog, setActiveDialog] = useState<"branch" | "merge" | "settings" | "log" | null>(null);
+  const [activeDialog, setActiveDialog] = useState<"branch" | "merge" | "settings" | "log" | "import-external" | "launch-server" | null>(null);
   const [untrackedDialog, setUntrackedDialog] = useState<{
     files: string[];
     onConfirm: () => void;
@@ -271,6 +280,22 @@ function App() {
           await refreshBranch(projectPath);
           break;
         }
+        case "clean-data": {
+          addLog("command", "> clean_data.bat");
+          const result = await runBatScript(projectPath, "clean_data.bat");
+          addLog("success", result || "清档完成");
+          await notify("Git 助手", "清档完成");
+          succeeded = true;
+          break;
+        }
+        case "quick-convert": {
+          addLog("command", "> 快速转表.bat");
+          const result = await runProjectScript(projectPath, "快速转表.bat");
+          addLog("success", result || "快速转表完成");
+          await notify("Git 助手", "快速转表完成");
+          succeeded = true;
+          break;
+        }
       }
     } catch (e) {
       addLog("error", `操作失败: ${e}`);
@@ -280,6 +305,41 @@ function App() {
       else if (action !== "force-pull") setLastResult("error");
     }
   }, [addLog, refreshBranch, notify]);
+
+  const executeImportExternal = useCallback(async (projectPath: string, stdinInput: string) => {
+    setLoadingAction("import-external");
+    setLastResult(null);
+    let succeeded = false;
+    try {
+      const urlCount = stdinInput.split("\n").filter(l => l.trim()).length;
+      addLog("command", urlCount > 0
+        ? `> 导入外网数据 (${urlCount} 条链接)`
+        : "> 导入外网数据 (仅导入已有数据)");
+      const exitCode = await runImportExternalStreaming(
+        projectPath,
+        stdinInput,
+        (line) => {
+          if (line.trim()) {
+            addLog("info", line);
+          }
+        },
+      );
+      if (exitCode === 0) {
+        addLog("success", "导入外网完成");
+        await notify("Git 助手", "导入外网完成");
+        succeeded = true;
+      } else {
+        addLog("error", `导入外网结束，退出码: ${exitCode}`);
+        await notify("Git 助手", "导入外网失败");
+      }
+    } catch (e) {
+      addLog("error", `导入外网失败: ${e}`);
+      await notify("Git 助手", "导入外网失败");
+    } finally {
+      setLoadingAction(null);
+      setLastResult(succeeded ? "success" : "error");
+    }
+  }, [addLog, notify]);
 
   const executeSwitchAction = useCallback(async (projectPath: string, targetBranch: string) => {
     setLoadingAction("switch");
@@ -514,6 +574,20 @@ function App() {
       return;
     }
 
+    if (action === "import-external") {
+      if (loadingAction) {
+        addLog("warning", "请等待当前操作完成后再执行导入外网");
+        return;
+      }
+      setActiveDialog("import-external");
+      return;
+    }
+
+    if (action === "launch-server") {
+      setActiveDialog("launch-server");
+      return;
+    }
+
     if (CONFIRM_ACTIONS[action]) {
       if (!window.confirm(CONFIRM_ACTIONS[action])) return;
     }
@@ -534,7 +608,7 @@ function App() {
     } else {
       executeAction(action, projectPath);
     }
-  }, [config, loadingAction, currentBranch, addLog, enqueue, executeAction, runOneKeyStart, runStartServer, runStartClient]);
+  }, [config, loadingAction, currentBranch, addLog, enqueue, executeAction, executeImportExternal, runOneKeyStart, runStartServer, runStartClient]);
 
   const handleEnqueueSwitch = useCallback((targetBranch: string) => {
     if (!config?.currentProject) return;
@@ -643,6 +717,36 @@ function App() {
           config={config}
           onConfigChange={handleConfigChange}
           onClose={() => setActiveDialog(null)}
+        />
+      )}
+
+      {activeDialog === "import-external" && config?.currentProject && (
+        <InputDialog
+          title="导入外网数据"
+          placeholder="请输入下载地址，每行一条"
+          onCancel={() => setActiveDialog(null)}
+          onConfirm={(value) => {
+            setActiveDialog(null);
+            const lines = value.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const stdinInput = lines.length > 0 ? lines.join("\n") + "\n\n" : "\n";
+            executeImportExternal(config.currentProject, stdinInput);
+          }}
+        />
+      )}
+
+      {activeDialog === "launch-server" && config?.currentProject && (
+        <ServerLauncherDialog
+          onClose={() => setActiveDialog(null)}
+          onLaunch={async (label, script) => {
+            const projectPath = config.currentProject;
+            try {
+              addLog("command", `> ${script} (${label})`);
+              const result = await launchBatScript(projectPath, script);
+              addLog("success", result || `${label} 已启动`);
+            } catch (e) {
+              addLog("error", `${label} 启动失败: ${e}`);
+            }
+          }}
         />
       )}
 

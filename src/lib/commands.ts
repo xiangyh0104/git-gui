@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { Config, BranchInfo, GitOutput, MergeResult, CommitEntry, RebaseResult } from '../types';
 
 export async function getConfig(): Promise<Config> {
@@ -87,6 +88,56 @@ export async function gitFetchRebase(projectPath: string): Promise<RebaseResult>
 
 export async function runBatScript(projectPath: string, scriptName: string): Promise<string> {
   return invoke<string>('run_bat_script', { projectPath, scriptName });
+}
+
+export async function runProjectScript(projectPath: string, scriptPath: string, stdinInput?: string): Promise<string> {
+  return invoke<string>('run_project_script', { projectPath, scriptPath, stdinInput: stdinInput ?? null });
+}
+
+export async function launchBatScript(projectPath: string, scriptName: string): Promise<string> {
+  return invoke<string>('launch_bat_script', { projectPath, scriptName });
+}
+
+export async function runImportExternalStreaming(
+  projectPath: string,
+  stdinInput: string | null,
+  onLine: (line: string) => void,
+): Promise<number> {
+  const unlisten: UnlistenFn = await listen<string>('script-output', (event) => {
+    onLine(event.payload);
+  });
+
+  try {
+    const code = await invoke<number>('run_import_external_streaming', {
+      projectPath,
+      stdinInput,
+    });
+    return code;
+  } finally {
+    unlisten();
+  }
+}
+
+export async function runScriptStreaming(
+  projectPath: string,
+  scriptPath: string,
+  stdinInput: string | null,
+  onLine: (line: string) => void,
+): Promise<number> {
+  const unlisten: UnlistenFn = await listen<string>('script-output', (event) => {
+    onLine(event.payload);
+  });
+
+  try {
+    const code = await invoke<number>('run_script_streaming', {
+      projectPath,
+      scriptPath,
+      stdinInput,
+    });
+    return code;
+  } finally {
+    unlisten();
+  }
 }
 
 export async function launchUnity(projectPath: string): Promise<string> {

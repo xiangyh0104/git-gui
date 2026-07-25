@@ -7,7 +7,7 @@ use git::{
     git_checkout_discard, git_force_pull, git_get_current_branch, git_list_remote_branches,
     git_log, git_merge_branch, git_push, git_repair, git_reset_hard, git_switch_branch,
     git_sync_before_merge, git_undo_commit,
-    launch_unity, run_bat_script,
+    launch_bat_script, launch_unity, run_bat_script, run_import_external_streaming, run_project_script, run_script_streaming,
 };
 use tauri::Manager;
 
@@ -45,6 +45,10 @@ pub fn run() {
             git_force_pull,
             git_repair,
             run_bat_script,
+            launch_bat_script,
+            run_project_script,
+            run_script_streaming,
+            run_import_external_streaming,
             launch_unity,
         ])
         .run(tauri::generate_context!())
